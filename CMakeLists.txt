@@ -82,7 +82,7 @@ target_link_libraries(${PROJECT_NAME}
         hardware_timer
         hardware_clocks
         pico_cyw43_arch_lwip_threadsafe_background
-        #hardware_adc
+        hardware_adc
         hardware_pwm
         FreeRTOS-Kernel
         FreeRTOS-Kernel-Heap4
