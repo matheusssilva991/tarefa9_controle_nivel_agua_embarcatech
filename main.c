@@ -102,11 +102,11 @@ void vLeituraPotenciometroTask(void *pvParameters){
     int porcentagem = 0;
     while (true){
         // ja estou armazenando na fila a porcentagem em relação ao valor lido
-        // 0% == 0 lido pelo adc
-        // 100% == 4095
+        // 0% == 22 lido pelo adc
+        // 100% == 4077
         adc_select_input(2); // GPIO 26 = ADC0
         porcentagem = (int)(((float)(adc_read() - ADC_MIN_LEITURA_POTENCIOMETRO) / (ADC_MAX_LEITURA_POTENCIOMETRO - ADC_MIN_LEITURA_POTENCIOMETRO)) * 100.0f);
-        xQueueSend(xQueueLeiturasDoPotenciometroConvertidoEmNivelDeAgua, &porcentagem, 0); // Envia o valor do joystick para a fila dos leds
+        xQueueSend(xQueueLeiturasDoPotenciometroConvertidoEmNivelDeAgua, &porcentagem, 0); // Envia o valor da leitura do potenciometro em porcentagem para fila
         vTaskDelay(pdMS_TO_TICKS(100));              // 10 Hz de leitura
     }
 }
@@ -118,7 +118,7 @@ void vAcionaBombaComBaseNoNivelTask(void * pvParameters){
 
     gpio_init(RELE_PIN);
     gpio_set_dir(RELE_PIN,GPIO_OUT);
-    gpio_put(RELE_PIN,1);// Começa com o Relé desligado, pois ele no nivel alto da gpio
+    gpio_put(RELE_PIN,1);// Começa com o Relé desligado, pois ele no nivel alto da gpio é desligado ja que é um rele com optoacoplador
     int nivelEmPorcentagem = 0;
     while (true){
         if (xQueueReceive(xQueueLeiturasDoPotenciometroConvertidoEmNivelDeAgua, &nivelEmPorcentagem, portMAX_DELAY) == pdTRUE){
@@ -261,7 +261,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
                         "%s",
                         (int)strlen(txt), txt);
     }
-    else if (strstr(req, "GET /estado")){  // Se a requisição for para obter o estado dos sensores/LED
+    else if (strstr(req, "GET /estado")){  // Se a requisição for para obter o estado dos sensores(potenciometro com boia)
         adc_select_input(2); // Seleciona o canal ADC 2 para o potenciômetro da boia
         // Converte para porcentagem
         int nivel_porcentagem = (int)(((float)(adc_read() - ADC_MIN_LEITURA_POTENCIOMETRO) / (ADC_MAX_LEITURA_POTENCIOMETRO - ADC_MIN_LEITURA_POTENCIOMETRO)) * 100.0f);
