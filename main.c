@@ -16,17 +16,35 @@
 #include "lib/button/button.h"
 #include "lib/ws2812b/ws2812b.h"
 #include "lib/buzzer/buzzer.h"
-#include "config/wifi_config.h"
+#include "config/wifi_config_example.h"
 #include "public/html_data.h"
 
 #include "FreeRTOS.h"
 #include "FreeRTOSConfig.h"
 #include "task.h"
+#include "queue.h"
+#include "semphr.h"
 
 #define CYW43_LED_PIN CYW43_WL_GPIO_LED_PIN // GPIO do CI CYW43
+
+#define PIN_ADC_LEITURA_POTENCIOMETRO 28 // Pino do ADC para ler os valores alterados no potencimetro pela boia
+#define RELE_PIN 16 // Gpio que ativará(low) e desativará(high) o relé para acionar a bomba
+
 #define ANALOG_PIN_X 27 // Pino do ADC para o eixo X do joystick
 #define ANALOG_PIN_Y 26 // Pino do ADC para o eixo Y do joystick
 
+// OBS: Na hora da montagem do reservatório precisamos ver até onde o potênciometro irá girar no nível mínimo  e máximo para ajustar os valores abaixo
+// Definições para o potenciômetro de boia
+#define ADC_MIN_LEITURA_POTENCIOMETRO 22   // Valor mínimo lido do potenciômetro (quando o reservatório está vazio)
+#define ADC_MAX_LEITURA_POTENCIOMETRO 4070 // Valor máximo lido do potenciômetro (quando o reservatório está cheio)
+
+// Limites que serão alterados pela interface Web, por padrão deixei assim so para testar
+volatile static int limite_minimo_nivel_agua = 10;
+volatile static int limite_maximo_nivel_agua = 90;
+
+// Fila para armazenar os valores de nivel de agua lidos
+QueueHandle_t xQueueLeiturasDoPotenciometroConvertidoEmNivelDeAgua;
+SemaphoreHandle_t xMutexDisplay;
 // Estrutura de dados
 struct http_state
 {
@@ -36,8 +54,10 @@ struct http_state
 };
 
 // Prototipos das funções
-void vTestTask(void *pvParameters);
 void vWebServerTask(void *pvParameters);
+void vMostraDadosNoDisplayTask(void *pvParameters);
+void vLeituraPotenciometroTask(void *pvParameters);
+void vAcionaBombaComBaseNoNivelTask(void * pvParameters);
 static err_t http_sent(void *arg, struct tcp_pcb *tpcb, u16_t len);
 static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err);
 static err_t connection_callback(void *arg, struct tcp_pcb *newpcb, err_t err);
@@ -55,91 +75,136 @@ int main()
 
     ssd1306_fill(&ssd, false); // Limpa a tela
     ssd1306_send_data(&ssd);   // Envia os dados para o display
-
-    xTaskCreate(vTestTask, "TestTask", configMINIMAL_STACK_SIZE,
-                NULL, tskIDLE_PRIORITY, NULL);
+    xQueueLeiturasDoPotenciometroConvertidoEmNivelDeAgua = xQueueCreate(5, sizeof(int));
+    xMutexDisplay = xSemaphoreCreateMutex();
     xTaskCreate(vWebServerTask, "WebServerTask", configMINIMAL_STACK_SIZE,
+                NULL, tskIDLE_PRIORITY + 2, NULL);
+    xTaskCreate(vAcionaBombaComBaseNoNivelTask, "AcionaBombaComBaseNoNivelTask", configMINIMAL_STACK_SIZE,
+                NULL, tskIDLE_PRIORITY, NULL);
+    xTaskCreate(vLeituraPotenciometroTask, "LeituraPotenciometroTask", configMINIMAL_STACK_SIZE,
+                NULL, tskIDLE_PRIORITY, NULL);
+    xTaskCreate(vMostraDadosNoDisplayTask, "vMostraDadosNoDisplayTask", configMINIMAL_STACK_SIZE,
                 NULL, tskIDLE_PRIORITY, NULL);
 
     vTaskStartScheduler();
     panic_unsupported();
 }
 
-void vTestTask(void *pvParameters)
-{
+
+
+// Task que controla a leitura do joystick
+void vLeituraPotenciometroTask(void *pvParameters){
     (void)pvParameters; // Evita aviso de parâmetro não utilizado
 
-    init_leds();                    // Inicializa os LEDs
-    init_btns();                    // Inicializa os botões
-    init_btn(BTN_SW_PIN);           // Inicializa o botão do joystick
-    init_buzzer(BUZZER_A_PIN, 4.0); // Inicializa o buzzer (pino BUZZER_A_PIN com divisor de clock 4.0)
-    ws2812b_init();                 // Inicializa a matriz de LEDs WS2812B
-
-    // Loop infinito
-    while (1)
-    {
-        ssd1306_fill(&ssd, false);                        // Limpa a tela
-        ssd1306_draw_string(&ssd, "Hello, World!", 0, 0); // Desenha a string no display
-        ssd1306_send_data(&ssd);                          // Envia os dados para o display
-
-        cyw43_arch_gpio_put(CYW43_LED_PIN, !cyw43_arch_gpio_get(CYW43_LED_PIN)); // Inverte o estado do LED
-
-        printf("Hello, World!\n"); // Imprime no console
-
-        ws2812b_clear(); // Limpa a matriz de LEDs
-        // Define uma cor para o primeiro LED
-        ws2812b_set_led(0, 255, 0, 0); // Define o primeiro LED como vermelho
-        ws2812b_write();
-
-        vTaskDelay(pdMS_TO_TICKS(1000)); // Aguarda 1 segundo
+    // Inicializa o adc e os pinos responsáveis pelo eixo x e y do joystick
+    adc_gpio_init(PIN_ADC_LEITURA_POTENCIOMETRO);
+    adc_init();
+    int porcentagem = 0;
+    while (true){
+        // ja estou armazenando na fila a porcentagem em relação ao valor lido
+        // 0% == 22 lido pelo adc
+        // 100% == 4077
+        adc_select_input(2); // GPIO 26 = ADC0
+        porcentagem = (int)(((float)(adc_read() - ADC_MIN_LEITURA_POTENCIOMETRO) / (ADC_MAX_LEITURA_POTENCIOMETRO - ADC_MIN_LEITURA_POTENCIOMETRO)) * 100.0f);
+        xQueueSend(xQueueLeiturasDoPotenciometroConvertidoEmNivelDeAgua, &porcentagem, 0); // Envia o valor da leitura do potenciometro em porcentagem para fila
+        vTaskDelay(pdMS_TO_TICKS(100));              // 10 Hz de leitura
     }
 }
 
-void vWebServerTask(void *pvParameters)
-{
+
+
+void vAcionaBombaComBaseNoNivelTask(void * pvParameters){
     (void)pvParameters; // Evita aviso de parâmetro não utilizado
 
-    // Temporário para evitar aviso de parâmetro não utilizado
-    adc_init();
-    adc_gpio_init(ANALOG_PIN_X); // Inicializa o pino do ADC para o eixo X
-    adc_gpio_init(ANALOG_PIN_Y); // Inicializa o pino do ADC para o eixo Y
-
-    // Inicializa a biblioteca CYW43 para Wi-Fi
-    if (cyw43_arch_init())
-    {
-        ssd1306_fill(&ssd, false);
-        ssd1306_draw_string(&ssd, "WiFi => FALHA", 0, 0);
-        ssd1306_send_data(&ssd);
-
-        vTaskDelete(NULL);  // Encerrar esta task
+    gpio_init(RELE_PIN);
+    gpio_set_dir(RELE_PIN,GPIO_OUT);
+    gpio_put(RELE_PIN,1);// Começa com o Relé desligado, pois ele no nivel alto da gpio é desligado ja que é um rele com optoacoplador
+    int nivelEmPorcentagem = 0;
+    while (true){
+        if (xQueueReceive(xQueueLeiturasDoPotenciometroConvertidoEmNivelDeAgua, &nivelEmPorcentagem, portMAX_DELAY) == pdTRUE){
+            if (nivelEmPorcentagem <= limite_minimo_nivel_agua){
+                gpio_put(RELE_PIN,0); // Ativa o rele deixando os 12v passarem para a bomba
+            }
+            else if (nivelEmPorcentagem >= limite_maximo_nivel_agua){
+                gpio_put(RELE_PIN,1); // Desativa o rele desligando a bomba
+            }
+            
+        }
+        
     }
+}
 
-    cyw43_arch_enable_sta_mode();
-    if (cyw43_arch_wifi_connect_timeout_ms(WIFI_SSID, WIFI_PASSWORD, CYW43_AUTH_WPA2_AES_PSK, 10000))
-    {
-        ssd1306_fill(&ssd, false);
-        ssd1306_draw_string(&ssd, "WiFi => ERRO", 0, 0);
-        ssd1306_send_data(&ssd);
+void vMostraDadosNoDisplayTask(void *pvParameters){
+    (void)pvParameters; // Evita aviso de parâmetro não utilizado
 
-        vTaskDelete(NULL);  // Encerrar esta task
+    int nivelAguaPorcentagem = 0;
+    char str_nivel[5]; // Buffer para armazenar a string
+    while (true){
+        if (xQueueReceive(xQueueLeiturasDoPotenciometroConvertidoEmNivelDeAgua, &nivelAguaPorcentagem, portMAX_DELAY) == pdTRUE){
+            if (xSemaphoreTake(xMutexDisplay,portMAX_DELAY) == pdTRUE){
+                sprintf(str_nivel, "%d%%", nivelAguaPorcentagem); // Formata com '%'
+                ssd1306_fill(&ssd, false);                     // Limpa o display
+                ssd1306_rect(&ssd, 3, 3, 122, 60, true, false); // Desenha um retângulo
+                ssd1306_line(&ssd, 3, 25, 123, 25, true);      // Desenha uma linha
+        
+                ssd1306_draw_string(&ssd, "MEDIDOR NIVEL", 8, 6); // Desenha uma string
+                ssd1306_draw_string(&ssd, " DE AGUA", 20, 16);  // Desenha uma string
+                ssd1306_draw_string(&ssd, "Nivel", 20, 31);           // Desenha uma string
+                ssd1306_draw_string(&ssd, str_nivel, 20, 42);         // Desenha uma string
+                ssd1306_send_data(&ssd);                             // Atualiza o display
+                xSemaphoreGive(xMutexDisplay);
+            }
+            
+        }
     }
+     
+}
 
-    uint8_t *ip = (uint8_t *)&(cyw43_state.netif[0].ip_addr.addr);
-    char ip_str[24];
-    snprintf(ip_str, sizeof(ip_str), "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
 
-    ssd1306_fill(&ssd, false);
-    ssd1306_draw_string(&ssd, "WiFi => OK", 0, 0);
-    ssd1306_draw_string(&ssd, ip_str, 0, 10);
-    ssd1306_send_data(&ssd);
+void vWebServerTask(void *pvParameters){
+    (void)pvParameters; // Evita aviso de parâmetro não utilizado
 
-    start_http_server();
+    if (xSemaphoreTake(xMutexDisplay,portMAX_DELAY) == pdTRUE){
+        // Inicializa a biblioteca CYW43 para Wi-Fi
+        if (cyw43_arch_init())
+        {
+            ssd1306_fill(&ssd, false);
+            ssd1306_draw_string(&ssd, "WiFi => FALHA", 0, 0);
+            ssd1306_send_data(&ssd);
 
-    while (1)
-    {
+            vTaskDelete(NULL);  // Encerrar esta task
+        }
+
+        cyw43_arch_enable_sta_mode();
+        if (cyw43_arch_wifi_connect_timeout_ms(WIFI_SSID, WIFI_PASSWORD, CYW43_AUTH_WPA2_AES_PSK, 30000))
+        {
+            ssd1306_fill(&ssd, false);
+            ssd1306_draw_string(&ssd, "WiFi => ERRO", 0, 0);
+            ssd1306_send_data(&ssd);
+
+            vTaskDelete(NULL);  // Encerrar esta task
+        }
+
+        uint8_t *ip = (uint8_t *)&(cyw43_state.netif[0].ip_addr.addr);
+        char ip_str[24];
+        snprintf(ip_str, sizeof(ip_str), "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
+
+        ssd1306_fill(&ssd, false);
+        ssd1306_draw_string(&ssd, "WiFi => OK", 0, 0);
+        ssd1306_draw_string(&ssd, ip_str, 0, 10);
+        ssd1306_send_data(&ssd);
+        start_http_server();
+        vTaskDelay(pdMS_TO_TICKS(2000)); // pra dar tempo de ver o ip
+        xSemaphoreGive(xMutexDisplay);
+    }
+    
+
+    while (1){
         // Mantém o servidor HTTP ativo
+        cyw43_arch_poll();
         vTaskDelay(pdMS_TO_TICKS(1000)); // Aguarda 1 segundo
     }
+     cyw43_arch_deinit();// Esperamos que nunca chegue aqui
 }
 
 static err_t http_sent(void *arg, struct tcp_pcb *tpcb, u16_t len)
@@ -172,49 +237,40 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
     }
     hs->sent = 0;
 
-    if (strstr(req, "GET /led/on"))
-    {
-        gpio_put(RED_LED_PIN, 1);
-        const char *txt = "Ligado";
+    if (strstr(req, "GET /bomba/on")){
+        gpio_put(RELE_PIN, 0); // Ativa o relé (LOW liga a bomba)
+        const char *txt = "Bomba Ligada";
         hs->len = snprintf(hs->response, sizeof(hs->response),
-                           "HTTP/1.1 200 OK\r\n"
-                           "Content-Type: text/plain\r\n"
-                           "Content-Length: %d\r\n"
-                           "Connection: close\r\n"
-                           "\r\n"
-                           "%s",
-                           (int)strlen(txt), txt);
+                        "HTTP/1.1 200 OK\r\n"
+                        "Content-Type: text/plain\r\n"
+                        "Content-Length: %d\r\n"
+                        "Connection: close\r\n"
+                        "\r\n"
+                        "%s",
+                        (int)strlen(txt), txt);
     }
-    else if (strstr(req, "GET /led/off"))
-    {
-        gpio_put(RED_LED_PIN, 0);
-        const char *txt = "Desligado";
+    else if (strstr(req, "GET /bomba/off")){
+        gpio_put(RELE_PIN, 1); // Desativa o relé (HIGH desliga a bomba)
+        const char *txt = "Bomba Desligada";
         hs->len = snprintf(hs->response, sizeof(hs->response),
-                           "HTTP/1.1 200 OK\r\n"
-                           "Content-Type: text/plain\r\n"
-                           "Content-Length: %d\r\n"
-                           "Connection: close\r\n"
-                           "\r\n"
-                           "%s",
-                           (int)strlen(txt), txt);
+                        "HTTP/1.1 200 OK\r\n"
+                        "Content-Type: text/plain\r\n"
+                        "Content-Length: %d\r\n"
+                        "Connection: close\r\n"
+                        "\r\n"
+                        "%s",
+                        (int)strlen(txt), txt);
     }
-    else if (strstr(req, "GET /estado"))
-    {
-        adc_select_input(0);
-        uint16_t x = adc_read();
-        adc_select_input(1);
-        uint16_t y = adc_read();
-        int botao = !gpio_get(BTN_A_PIN);
-        int joy = !gpio_get(BTN_SW_PIN);
-
-        char json_payload[96];
+    else if (strstr(req, "GET /estado")){  // Se a requisição for para obter o estado dos sensores(potenciometro com boia)
+        adc_select_input(2); // Seleciona o canal ADC 2 para o potenciômetro da boia
+        // Converte para porcentagem
+        int nivel_porcentagem = (int)(((float)(adc_read() - ADC_MIN_LEITURA_POTENCIOMETRO) / (ADC_MAX_LEITURA_POTENCIOMETRO - ADC_MIN_LEITURA_POTENCIOMETRO)) * 100.0f);
+        int estado_bomba_para_json = !gpio_get(RELE_PIN);
+        char json_payload[96]; // Buffer para a string JSON
         int json_len = snprintf(json_payload, sizeof(json_payload),
-                                "{\"led\":%d,\"x\":%d,\"y\":%d,\"botao\":%d,\"joy\":%d}\r\n",
-                                gpio_get(RED_LED_PIN), x, y, botao, joy);
-
-        printf("[DEBUG] JSON: %s\n", json_payload);
-
-        hs->len = snprintf(hs->response, sizeof(hs->response),
+                                 "{\"bomba_agua\":%d,\"nivel_agua\":%d}\r\n",
+                                 estado_bomba_para_json, nivel_porcentagem); // Enviando como 'nivel_agua' e 'bomba_agua'
+         hs->len = snprintf(hs->response, sizeof(hs->response),
                            "HTTP/1.1 200 OK\r\n"
                            "Content-Type: application/json\r\n"
                            "Content-Length: %d\r\n"
@@ -222,9 +278,9 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
                            "\r\n"
                            "%s",
                            json_len, json_payload);
+
     }
-    else
-    {
+    else{
         hs->len = snprintf(hs->response, sizeof(hs->response),
                            "HTTP/1.1 200 OK\r\n"
                            "Content-Type: text/html\r\n"
@@ -268,3 +324,4 @@ static void start_http_server(void)
     tcp_accept(pcb, connection_callback);
     printf("Servidor HTTP rodando na porta 80...\n");
 }
+
