@@ -2,18 +2,42 @@
 #define HTML_DATA_H
 
 const char *html_data =
-"HTTP/1.1 200 OK\r\n"
-"Content-Type: text/html\r\n"
-/* "Content-Length: 2220\r\n" // Substitua 1234 pelo tamanho real do conteúdo HTML
-"Connection: close\r\n" */
-"\r\n"
-"<!DOCTYPE html><html lang=\"pt-br\"><head><meta charset=\"UTF-8\"><title>Estacionamento Inteligente</title>"
-"<style>body{font-family:Arial,sans-serif;background:#f4f4f4;margin:0;padding:0;}.container{max-width:600px;margin:20px auto;padding:10px;background:#fff;border-radius:6px;box-shadow:0 2px 6px #0001;}h1{text-align:center;color:#222;}.content{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:20px;}.box{background:#e9e9e9;padding:10px;border-radius:4px;text-align:center;}.pcd{border:2px dashed #2196F3;background:#E3F2FD;position:relative;}.vaga-tipo{font-weight:bold;margin-bottom:6px;}.btn-reservar{background:#4CAF50;color:#fff;padding:6px 12px;border:none;border-radius:3px;cursor:pointer;margin-top:8px;}.btn-reservar:disabled{background:#bbb;cursor:not-allowed;}.status-indicator{width:14px;height:14px;border-radius:50%%;display:inline-block;margin-bottom:6px;}.disponivel{background:#4CAF50;}.ocupada{background:#f44336;}.reservada{background:#ff9800;}.status-text{font-size:0.9em;color:#555;margin:4px 0;}</style></head><body>"
-"<div class=\"container\"><h1>Estacionamento Inteligente</h1><div class=\"content\">"
-"<div class=\"box %s\"><div class=\"status-indicator %s\"></div><div class=\"vaga-tipo\">Vaga 1%s</div><p>%s</p><p class=\"status-text\">%s</p><form action=\"./reservar-vaga-1\"><button class=\"btn-reservar\" %s>Reservar</button></form></div>"
-"<div class=\"box %s\"><div class=\"status-indicator %s\"></div><div class=\"vaga-tipo\">Vaga 2%s</div><p>%s</p><p class=\"status-text\">%s</p><form action=\"./reservar-vaga-2\"><button class=\"btn-reservar\" %s>Reservar</button></form></div>"
-"<div class=\"box %s\"><div class=\"status-indicator %s\"></div><div class=\"vaga-tipo\">Vaga 3%s</div><p>%s</p><p class=\"status-text\">%s</p><form action=\"./reservar-vaga-3\"><button class=\"btn-reservar\" %s>Reservar</button></form></div>"
-"<div class=\"box %s\"><div class=\"status-indicator %s\"></div><div class=\"vaga-tipo\">Vaga 4%s</div><p>%s</p><p class=\"status-text\">%s</p><form action=\"./reservar-vaga-4\"><button class=\"btn-reservar\" %s>Reservar</button></form></div>"
-"</div></div><script>setTimeout(()=>{window.location.href = '/';},5000);</script></body></html>";
+    "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Controle do LED</title>"
+    "<style>"
+    "body { font-family: sans-serif; text-align: center; padding: 10px; margin: 0; background:rgb(0, 0, 0); color: white}"
+    ".botao { font-size: 20px; padding: 10px 30px; margin: 10px; border: none; border-radius: 8px; }"
+    ".on { background: #4CAF50; color: white; }"
+    ".off { background: #f44336; color: white; }"
+    ".barra { width: 30%; background: #ddd; border-radius: 6px; overflow: hidden; margin: 0 auto 15px auto; height: 20px; }"
+
+    ".preenchimento { height: 100%; transition: width 0.3s ease; }"
+    "#barra_x { background: #2196F3; }"
+    ".label { font-weight: bold; margin-bottom: 5px; display: block; }"
+    ".bolinha { width: 20px; height: 20px; border-radius: 50%; display: inline-block; margin-left: 10px; background: #ccc; transition: background 0.3s ease; }"
+    "@media (max-width: 600px) { .botao { width: 80%; font-size: 18px; } }"
+    "</style>"
+    "<script>"
+    "function sendCommand(cmd) { fetch('/'+cmd); }"
+    "function atualizar() {"
+    "  fetch('/estado').then(res => res.json()).then(data => {"
+    "    document.getElementById('estado').innerText = data.bomba_agua ? 'Ligado' : 'Desligado';"
+    "    document.getElementById('valor_potenciometro').innerText = data.nivel_agua;"
+    "    document.getElementById('barra_x').style.width = data.nivel_agua + '%';"
+    "  });"
+    "}"
+    "setInterval(atualizar, 100);"
+    "</script></head><body>"
+
+    "<h1>Controle do Nivel de água no Reservatório</h1>"
+
+    "<p>Estado da Bomba de água: <span id='estado'>--</span></p>"
+
+    "<p class='label'>Nivel de água: <span id='valor_potenciometro'>--</span>%</p>"
+    "<div class='barra'><div id='barra_x' class='preenchimento'></div></div>"
+
+    "<button class='botao on' onclick=\"sendCommand('bomba/on')\">Ligar bomba</button>"
+    "<button class='botao off' onclick=\"sendCommand('bomba/off')\">Desligar Bomba</button>"
+
+    "</body></html>";
 
 #endif // HTML_DATA_H
