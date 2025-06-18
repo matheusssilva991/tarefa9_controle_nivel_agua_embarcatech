@@ -2,7 +2,7 @@
 #define WIFI_CONFIG_H
 
 // Wi-Fi credentials
-#define WIFI_SSID "Leonardo"
-#define WIFI_PASSWORD "00695470PI"
+#define WIFI_SSID "Your SSID Here"
+#define WIFI_PASSWORD "Your Password Here"
 
 #endif // WIFI_CONFIG_H
