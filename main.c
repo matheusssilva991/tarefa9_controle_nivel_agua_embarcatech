@@ -101,7 +101,7 @@ void vLeituraPotenciometroTask(void *pvParameters){
     int porcentagem = 0;
     while (true){
         // ja estou armazenando na fila a porcentagem em relação ao valor lido
-        // OBS : ESTES VALORES DEVEM SER TESTADOS E MUDADOS PARA SE ADEQUAR AO NIVEL MINIMO E MAXIMO EXATO DO RESERVATÓRIO
+
         // 0% == 22 lido pelo adc
         // 100% == 4077
         adc_select_input(2); // GPIO 26 = ADC0
@@ -274,8 +274,8 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
                         "%s",
                         (int)strlen(txt), txt);
     }
-     // Verifica se a requisição for para obter o estado dos sensores(potenciometro com boia)
-    else if (strstr(req, "GET /estado")){ 
+
+    else if (strstr(req, "GET /estado")){  // Se a requisição for para obter o estado dos sensores(potenciometro com boia)
         adc_select_input(2); // Seleciona o canal ADC 2 para o potenciômetro da boia
         // Converte para porcentagem
         int nivel_porcentagem = (int)(((float)(adc_read() - ADC_MIN_LEITURA_POTENCIOMETRO) / (ADC_MAX_LEITURA_POTENCIOMETRO - ADC_MIN_LEITURA_POTENCIOMETRO)) * 100.0f);
