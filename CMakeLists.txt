@@ -44,6 +44,7 @@ add_executable(${PROJECT_NAME} main.c
         lib/ssd1306/display.c # Display library
         lib/ws2812b/ws2812b.c # WS2812B library
         lib/buzzer/buzzer.c # Buzzer library)
+        lib/ultrasonic/ultrasonic.c # Ultrasonic library
 )
 
 pico_set_program_name(${PROJECT_NAME} "${PROJECT_NAME}")
