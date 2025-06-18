@@ -1,6 +1,7 @@
 #ifndef HTML_DATA_H
 #define HTML_DATA_H
 
+// WebServer formado por html, css e javascript
 const char *html_data =
     "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Controle do LED</title>"
     "<style>"

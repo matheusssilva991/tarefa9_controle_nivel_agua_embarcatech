@@ -1,31 +1,86 @@
-.program led_matrix
-.side_set 1
-.wrap_target
-    out x, 1        side 0 [2]
-    jmp !x, 3       side 1 [1]
-    jmp 0           side 1 [4]
-    nop             side 0 [4]
-.wrap
+.program led_matrix  ; Declara o nome do programa PIO: 'led_matrix'.
+.side_set 1          ; Define que usaremos 1 pino para "sideset".
+                     ; O sideset permite que o programa PIO controle o estado de um pino (ou mais)
+                     ; 'ao lado' da instrução principal, de forma independente ou sincronizada.
+                     ; Aqui, ele é usado para controlar o nível HIGH/LOW do pino de dados do WS2812B.
 
+.wrap_target         ; Marca o início do loop principal do programa.
+                     ; Quando o SM atinge a instrução '.wrap', ele volta para '.wrap_target'.
+
+    out x, 1         side 0 [2] ; [1] Envia 1 bit do registrador X para o pino de saída.
+                                ; `out x, 1`: Pega o bit menos significativo de `X` e o coloca no pino de saída.
+                                ; `side 0`: Define o pino de sideset (o pino de dados do LED) para LOW.
+                                ; `[2]`: Pausa por 2 ciclos de clock APÓS a instrução, mas ANTES da próxima.
+                                ; Este é o tempo baixo para a transmissão de um bit.
+
+    jmp !x, 3        side 1 [1] ; [2] Salta condicionalmente.
+                                ; `jmp !x, 3`: Se o bit mais recente que saiu de X (aquele que acabamos de enviar)
+                                ;              for 0 (!x é verdadeiro para x=0), salta para o rótulo na linha 3
+                                ;              (rótulo 'nop' mais abaixo, que representa a transmissão de um bit '0').
+                                ; `side 1`: Define o pino de sideset (o pino de dados do LED) para HIGH.
+                                ; `[1]`: Pausa por 1 ciclo de clock.
+                                ; Esta instrução marca o início da parte HIGH da transmissão do bit.
+                                ; Se o bit for '1' (ou seja, !x é falso), ele continua para a próxima instrução.
+
+    jmp 0            side 1 [4] ; [3] Salta incondicionalmente.
+                                ; `jmp 0`: Salta para a primeira instrução do programa (o 'out x, 1' no rótulo 0).
+                                ; `side 1`: Mantém o pino de sideset em HIGH.
+                                ; `[4]`: Pausa por 4 ciclos de clock.
+                                ; Esta linha é executada APENAS se o bit enviado foi um '1'.
+                                ; Ela garante que o pulso HIGH para um '1' tenha a duração correta (1 ciclo da instrução anterior + 4 ciclos aqui = 5 ciclos HIGH).
+
+    nop              side 0 [4] ; [4] Não faz nada (no-operation).
+                                ; `nop`: A instrução em si não faz nada.
+                                ; `side 0`: Define o pino de sideset para LOW.
+                                ; `[4]`: Pausa por 4 ciclos de clock.
+                                ; Esta linha é executada APENAS se o bit enviado foi um '0' (devido ao `jmp !x, 3`).
+                                ; Ela garante que o pulso LOW para um '0' tenha a duração correta (1 ciclo do jmp anterior + 4 ciclos aqui = 5 ciclos LOW).
+
+.wrap                ; Marca o fim do loop principal.
+                     ; O SM volta para o '.wrap_target'.
 
 % c-sdk {
-#include "hardware/clocks.h"
+#include "hardware/clocks.h" // Inclui a biblioteca para acessar informações de clock do sistema.
 
 void led_matrix_program_init(PIO pio, uint sm, uint offset, uint pin, float freq) {
+    // `pio`: O bloco PIO a ser usado (pio0 ou pio1).
+    // `sm`: A State Machine a ser configurada (0-3).
+    // `offset`: O endereço de memória onde o programa PIO foi carregado.
+    // `pin`: O número do pino GPIO que será usado para a saída de dados do LED.
+    // `freq`: A frequência desejada dos bits codificados (quantos bits por segundo esperamos transmitir).
 
-  pio_gpio_init(pio, pin);
+    pio_gpio_init(pio, pin); // Inicializa o pino GPIO fornecido para ser controlado pelo PIO.
 
-  pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, true);
+    // Define a direção do pino como saída. O `true` no final habilita o mapeamento do sideset.
+    pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, true);
 
-  // Program configuration.
-  pio_sm_config c = led_matrix_program_get_default_config(offset);
-  sm_config_set_sideset_pins(&c, pin); // Uses sideset pins.
-  sm_config_set_out_shift(&c, true, true, 8); // 8 bit transfers, right-shift.
-  sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX); // Use only TX FIFO.
-  float prescaler = clock_get_hz(clk_sys) / (10.f * freq); // 10 cycles per transmission, freq is frequency of encoded bits.
-  sm_config_set_clkdiv(&c, prescaler);
+    // Program configuration.
+    // Obtém uma configuração padrão para este programa PIO, dado o offset onde ele foi carregado.
+    pio_sm_config c = led_matrix_program_get_default_config(offset);
 
-  pio_sm_init(pio, sm, offset, &c);
-  pio_sm_set_enabled(pio, sm, true);
+    // sm_config_set_sideset_pins(&c, pin); // Configura o pino de sideset para ser o 'pin' fornecido.
+                                          // Este pino será controlado pelas instruções `side X`.
+
+    // sm_config_set_out_shift(&c, true, true, 8); // Configura o deslocamento de saída (OUT_SHIFT).
+                                                // `true` (primeiro): Deslocar para a direita (LSB primeiro).
+                                                // `true` (segundo): Habilita o auto-push (automaticamente move dados do ISR para o FIFO).
+                                                // `8`: Desloca 8 bits por vez para o registrador de saída.
+                                                // Isso significa que você envia bytes completos para o FIFO TX.
+
+    // sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX); // Configura a junção do FIFO.
+                                                   // `PIO_FIFO_JOIN_TX`: Une os dois FIFOs de 4 palavras (RX e TX)
+                                                   // em um único FIFO TX de 8 palavras, aumentando o buffer de saída.
+                                                   // Isso é bom para transmitir sequências longas de dados.
+
+    // Calcula o divisor de clock para atingir a frequência de bit desejada.
+    // `clock_get_hz(clk_sys)`: Obtém a frequência do clock do sistema (geralmente 125 MHz).
+    // `10.f`: Indica que cada bit leva 10 ciclos de clock PIO para ser transmitido (soma dos ciclos no código PIO).
+    // `freq`: É a frequência de bits desejada (ex: 800 kHz para WS2812B).
+    // `prescaler`: O valor pelo qual o clock do sistema será dividido para alimentar o SM.
+    float prescaler = clock_get_hz(clk_sys) / (10.f * freq);
+    sm_config_set_clkdiv(&c, prescaler); // Aplica o divisor de clock à configuração do SM.
+
+    pio_sm_init(pio, sm, offset, &c); // Inicializa a State Machine com o programa e as configurações.
+    pio_sm_set_enabled(pio, sm, true); // Habilita (inicia) a State Machine.
 }
 %}
