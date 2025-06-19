@@ -217,6 +217,7 @@ void vMostraDadosNoDisplayTask(void *pvParameters){
                 ssd1306_draw_string(&ssd, " DE AGUA", 20, 16);  // Desenha uma string
                 ssd1306_draw_string(&ssd, "Nivel: ", 10, 31);           // Desenha uma string
                 ssd1306_draw_string(&ssd, str_nivel, 58, 31);         // Desenha uma string
+                ssd1306_draw_string(&ssd, gpio_get(RELE_PIN) ? "Bomba: OFF" : "Bomba: ON", 10,41);
                 ssd1306_send_data(&ssd);                             // Atualiza o display
                 xSemaphoreGive(xMutexDisplay);
             }
