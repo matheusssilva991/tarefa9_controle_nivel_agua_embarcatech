@@ -25,12 +25,7 @@ void ws2812b_init()
     led_matrix_program_init(led_matrix_pio, sm, offset, LED_MATRIX_PIN, 800000.f);
 
     // Limpa buffer de pixels.
-    for (uint i = 0; i < LED_MATRIX_SIZE; ++i)
-    {
-        led_matrix[i].R = 0;
-        led_matrix[i].G = 0;
-        led_matrix[i].B = 0;
-    }
+    ws2812b_clear();
 }
 
 // Atribui uma cor RGB a um LED.
@@ -54,9 +49,9 @@ void ws2812b_write()
     // Escreve cada dado de 8-bits dos pixels em sequência no buffer da máquina PIO.
     for (uint i = 0; i < LED_MATRIX_SIZE; ++i)
     {
-        pio_sm_put_blocking(led_matrix_pio, sm, led_matrix[i].G);
-        pio_sm_put_blocking(led_matrix_pio, sm, led_matrix[i].R);
-        pio_sm_put_blocking(led_matrix_pio, sm, led_matrix[i].B);
+        pio_sm_put_blocking(led_matrix_pio, sm, led_matrix[i].G<<24);
+        pio_sm_put_blocking(led_matrix_pio, sm, led_matrix[i].R<<24);
+        pio_sm_put_blocking(led_matrix_pio, sm, led_matrix[i].B<<24);
     }
     sleep_us(100); // Espera 100us, sinal de RESET do datasheet.
 }
