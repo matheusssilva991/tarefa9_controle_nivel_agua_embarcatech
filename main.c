@@ -73,6 +73,7 @@ float ultrasonic_distance = 0.0f; // Variável para armazenar a distância medid
 int main()
 {
     stdio_init_all();
+    sleep_ms(2000); // Aguarda a serial se conectar
 
     // Inicializa o display OLED
     init_display(&ssd);
@@ -101,16 +102,22 @@ void vUltrasonicSensorTask(void *pvParameters){
     (void)pvParameters; // Evita aviso de parâmetro não utilizado
 
     // Inicializa os pinos do sensor ultrassônico
-    setupUltrasonicPins(ULTRASONIC_TRIG_PIN, ULTRASONIC_ECHO_PIN);
+    setup_ultrasonic_pins(ULTRASONIC_TRIG_PIN, ULTRASONIC_ECHO_PIN);
 
     while (true){
-        ultrasonic_distance = getCm(ULTRASONIC_TRIG_PIN, ULTRASONIC_ECHO_PIN); // Lê a distância em cm
-        if (ultrasonic_distance < 0) {
-            printf("Erro ao ler o sensor ultrassônico.\n");
-            continue; // Se houve erro, continua para a próxima iteração
+        uint64_t pulse_duration = get_pulse_duration_us(ULTRASONIC_TRIG_PIN, ULTRASONIC_ECHO_PIN);
+
+        if (pulse_duration > 0) {
+            float distance_cm = microseconds_to_cm(pulse_duration);
+            float distance_inches = microseconds_to_inches(pulse_duration);
+
+            printf("Distância: %.2f cm (%.2f inches)\n", distance_cm, distance_inches);
+            ultrasonic_distance = distance_cm; // Armazena a distância medida
+        } else {
+            printf("Erro: Timeout. Nenhum objeto detectado no alcance.\n");
         }
-        printf("Distância medida: %.2f cm\n", ultrasonic_distance);
-        vTaskDelay(pdMS_TO_TICKS(500)); // Aguarda 1 segundo
+
+        sleep_ms(500);
     }
 }
 

@@ -31,7 +31,7 @@ set(FREERTOS_KERNEL_PATH "/home/matheus/FreeRTOS-Kernel")
 include(${FREERTOS_KERNEL_PATH}/portable/ThirdParty/GCC/RP2040/FreeRTOS_Kernel_import.cmake)
 
 
-project(tarefa9_controle_nivel_agua_embarcatech C CXX ASM)
+project(main C CXX ASM)
 
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
@@ -89,5 +89,5 @@ target_link_libraries(${PROJECT_NAME}
         FreeRTOS-Kernel-Heap4
 )
 
-pico_add_extra_outputs(tarefa9_controle_nivel_agua_embarcatech)
+pico_add_extra_outputs(${PROJECT_NAME})
 
