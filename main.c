@@ -14,7 +14,7 @@
 #include "lib/ssd1306/display.h"
 #include "lib/led/led.h"
 #include "lib/button/button.h"
-#include "lib/ws2812b/ws2812b.h"
+#include "lib/matrix_leds/matrix_leds.h"
 #include "lib/buzzer/buzzer.h"
 #include "config/wifi_config_example.h"
 #include "public/html_data.h"
@@ -39,8 +39,9 @@
 #define ADC_MAX_LEITURA_POTENCIOMETRO 4070 // Valor máximo lido do potenciômetro (quando o reservatório está cheio)
 
 // Limites que serão alterados pela interface Web, por padrão deixei assim so para testar
-volatile static int limite_minimo_nivel_agua = 10;
-volatile static int limite_maximo_nivel_agua = 90;
+volatile static uint8_t limite_minimo_nivel_agua = 10;
+volatile static uint8_t limite_maximo_nivel_agua = 90;
+volatile static bool reset_limits=false;
 
 // Fila para armazenar os valores de nivel de agua lidos
 QueueHandle_t xQueueLeiturasDoPotenciometroConvertidoEmNivelDeAgua;
@@ -58,10 +59,12 @@ void vWebServerTask(void *pvParameters);
 void vMostraDadosNoDisplayTask(void *pvParameters);
 void vLeituraPotenciometroTask(void *pvParameters);
 void vAcionaBombaComBaseNoNivelTask(void * pvParameters);
+void vMatrixLedsTask(void *pvParameters);
 static err_t http_sent(void *arg, struct tcp_pcb *tpcb, u16_t len);
 static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err);
 static err_t connection_callback(void *arg, struct tcp_pcb *newpcb, err_t err);
 static void start_http_server(void);
+void button_callback(uint gpio, uint32_t events);
 
 // Variáveis globais
 ssd1306_t ssd; // Declaração do display OLED
@@ -70,8 +73,14 @@ int main()
 {
     stdio_init_all();
 
+    button_init_predefined(true,true,true);
+
+    button_setup_irq(true,true,true,button_callback);
+
     // Inicializa o display OLED
     init_display(&ssd);
+
+    init_leds();
 
     ssd1306_fill(&ssd, false); // Limpa a tela
     ssd1306_send_data(&ssd);   // Envia os dados para o display
@@ -85,9 +94,30 @@ int main()
                 NULL, tskIDLE_PRIORITY, NULL);
     xTaskCreate(vMostraDadosNoDisplayTask, "vMostraDadosNoDisplayTask", configMINIMAL_STACK_SIZE,
                 NULL, tskIDLE_PRIORITY, NULL);
+    xTaskCreate(vMatrixLedsTask, "vMatrixLedsTask", configMINIMAL_STACK_SIZE,
+                NULL, tskIDLE_PRIORITY, NULL);
 
     vTaskStartScheduler();
     panic_unsupported();
+}
+
+void button_callback(uint gpio, uint32_t events){
+    uint32_t current_time = to_ms_since_boot(get_absolute_time());
+
+    if(current_time - last_debounce_time > debounce_delay){
+
+        if(gpio == BUTTON_A){
+            reset_limits=true;
+        }
+        else if(gpio == BUTTON_B){
+            
+        }
+        else if(gpio == BUTTON_SW){
+            
+        }
+
+        last_debounce_time = current_time;
+    }
 }
 
 
@@ -119,14 +149,50 @@ void vAcionaBombaComBaseNoNivelTask(void * pvParameters){
     gpio_init(RELE_PIN);
     gpio_set_dir(RELE_PIN,GPIO_OUT);
     gpio_put(RELE_PIN,1);// Começa com o Relé desligado, pois ele no nivel alto da gpio é desligado ja que é um rele com optoacoplador
-    int nivelEmPorcentagem = 0;
+    uint8_t nivelEmPorcentagem = 0;
+    int slice_num = init_buzzer(BUZZER_A_PIN,4.0);
+
+    if (!gpio_get(RELE_PIN)){
+        set_led_green();
+    }else if(gpio_get(RELE_PIN)){
+        set_led_yellow();
+    }
+
     while (true){
+        if (reset_limits)
+        {
+            limite_maximo_nivel_agua=90;
+            limite_minimo_nivel_agua=10;
+            reset_limits=false;
+            printf("Limites reinicializados\n");
+        }
+        
         if (xQueueReceive(xQueueLeiturasDoPotenciometroConvertidoEmNivelDeAgua, &nivelEmPorcentagem, portMAX_DELAY) == pdTRUE){
             if (nivelEmPorcentagem <= limite_minimo_nivel_agua){
                 gpio_put(RELE_PIN,0); // Ativa o rele deixando os 12v passarem para a bomba
             }
             else if (nivelEmPorcentagem >= limite_maximo_nivel_agua){
                 gpio_put(RELE_PIN,1); // Desativa o rele desligando a bomba
+
+            }
+            
+        }
+
+        if (!gpio_get(RELE_PIN) && gpio_get(RED_LED_PIN)){
+            set_led_green();
+
+            play_tone(BUZZER_A_PIN, 300);
+            vTaskDelay(pdMS_TO_TICKS(250)); // Toca o buzzer por 250ms
+            stop_tone(BUZZER_A_PIN);
+
+        }else if(gpio_get(RELE_PIN) && !gpio_get(RED_LED_PIN)){
+            set_led_yellow();
+            for (uint8_t i = 0; i < 2; i++)
+            {
+                play_tone(BUZZER_A_PIN, 900);
+                vTaskDelay(pdMS_TO_TICKS(150)); // Toca o buzzer por 250ms
+                stop_tone(BUZZER_A_PIN);
+                vTaskDelay(pdMS_TO_TICKS(150)); // Toca o buzzer por 250ms
             }
             
         }
@@ -149,15 +215,42 @@ void vMostraDadosNoDisplayTask(void *pvParameters){
         
                 ssd1306_draw_string(&ssd, "MEDIDOR NIVEL", 8, 6); // Desenha uma string
                 ssd1306_draw_string(&ssd, " DE AGUA", 20, 16);  // Desenha uma string
-                ssd1306_draw_string(&ssd, "Nivel", 20, 31);           // Desenha uma string
-                ssd1306_draw_string(&ssd, str_nivel, 20, 42);         // Desenha uma string
+                ssd1306_draw_string(&ssd, "Nivel: ", 10, 31);           // Desenha uma string
+                ssd1306_draw_string(&ssd, str_nivel, 58, 31);         // Desenha uma string
                 ssd1306_send_data(&ssd);                             // Atualiza o display
                 xSemaphoreGive(xMutexDisplay);
             }
             
         }
     }
-     
+}
+
+void vMatrixLedsTask(void *pvParameters){
+    (void)pvParameters; // Evita aviso de parâmetro não utilizado
+    init_led_matrix();
+    apaga_matriz();
+    uint8_t nivelEmPorcentagem = 0;
+
+    while (true)
+    {
+        if(xQueueReceive(xQueueLeiturasDoPotenciometroConvertidoEmNivelDeAgua, &nivelEmPorcentagem, portMAX_DELAY) == pdTRUE){
+            if (nivelEmPorcentagem >= 80){
+                desenha_frame(levels,4);
+            }else if(nivelEmPorcentagem >= 60){
+                desenha_frame(levels,3);
+            }else if(nivelEmPorcentagem >= 40){
+                desenha_frame(levels,2);
+            }else if(nivelEmPorcentagem >= 20){
+                desenha_frame(levels,1);
+            }else{
+                desenha_frame(levels,0);
+            }
+            
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    
+
 }
 
 
@@ -188,7 +281,7 @@ void vWebServerTask(void *pvParameters){
         uint8_t *ip = (uint8_t *)&(cyw43_state.netif[0].ip_addr.addr);
         char ip_str[24];
         snprintf(ip_str, sizeof(ip_str), "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
-
+        printf("IP: %s\n",ip_str);
         ssd1306_fill(&ssd, false);
         ssd1306_draw_string(&ssd, "WiFi => OK", 0, 0);
         ssd1306_draw_string(&ssd, ip_str, 0, 10);
