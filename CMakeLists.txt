@@ -42,15 +42,15 @@ add_executable(${PROJECT_NAME} main.c
         lib/led/led.c # LED library
         lib/ssd1306/ssd1306.c # SSD1306 library
         lib/ssd1306/display.c # Display library
-        lib/ws2812b/ws2812b.c # WS2812B library
         lib/buzzer/buzzer.c # Buzzer library)
+        lib/matrix_leds/matrix_leds.c # Matrix LEDs library
 )
 
 pico_set_program_name(${PROJECT_NAME} "${PROJECT_NAME}")
 pico_set_program_version(${PROJECT_NAME} "0.1")
 
 # Generate PIO header
-pico_generate_pio_header(${PROJECT_NAME} ${CMAKE_CURRENT_LIST_DIR}/lib/ws2812b/pio/ws2812b.pio)
+pico_generate_pio_header(${PROJECT_NAME} ${CMAKE_CURRENT_LIST_DIR}/lib/matrix_leds/pio_matrix.pio)
 
 # Modify the below lines to enable/disable output over UART/USB
 pico_enable_stdio_uart(${PROJECT_NAME} 0)
