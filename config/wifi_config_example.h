@@ -2,7 +2,7 @@
 #define WIFI_CONFIG_H
 
 // Wi-Fi credentials
-#define WIFI_SSID "Leonardo"
-#define WIFI_PASSWORD "00695470PI"
+#define WIFI_SSID "EmbarcaTech"
+#define WIFI_PASSWORD "Restic_37"
 
 #endif // WIFI_CONFIG_H
