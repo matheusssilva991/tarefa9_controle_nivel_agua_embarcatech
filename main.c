@@ -28,7 +28,7 @@
 
 #define CYW43_LED_PIN CYW43_WL_GPIO_LED_PIN // GPIO do CI CYW43
 
-#define PIN_ADC_LEITURA_POTENCIOMETRO 28 // Pino do ADC para ler os valores alterados no potencimetro pela boia
+#define ADC_PIN_POTENTIOMETER_READ 28 // Pino do ADC para ler os valores alterados no potencimetro pela boia
 #define RELE_PIN 16 // Gpio que ativará(low) e desativará(high) o relé para acionar a bomba
 
 #define ANALOG_PIN_X 27 // Pino do ADC para o eixo X do joystick
@@ -39,8 +39,8 @@
 
 // OBS: Na hora da montagem do reservatório precisamos ver até onde o potênciometro irá girar no nível mínimo  e máximo para ajustar os valores abaixo
 // Definições para o potenciômetro de boia
-#define ADC_MIN_LEITURA_POTENCIOMETRO 22   // Valor mínimo lido do potenciômetro (quando o reservatório está vazio)
-#define ADC_MAX_LEITURA_POTENCIOMETRO 4070 // Valor máximo lido do potenciômetro (quando o reservatório está cheio)
+#define ADC_MIN_POTENTIOMETER_READING 22   // Valor mínimo lido do potenciômetro (quando o reservatório está vazio)
+#define ADC_MAX_POTENTIOMETER_READING 4070 // Valor máximo lido do potenciômetro (quando o reservatório está cheio)
 
 // Fila para armazenar os valores de nivel de agua lidos
 QueueHandle_t xQueueWaterLevelReadings;
@@ -59,6 +59,7 @@ void vDisplayTask(void *pvParameters);
 void vReadPotentiometerTask(void *pvParameters);
 void vControlWaterPumpTask(void * pvParameters);
 void vUltrasonicSensorTask(void *pvParameters);
+void vMatrixLedsTask(void *pvParameters);
 static err_t http_sent(void *arg, struct tcp_pcb *tpcb, u16_t len);
 static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err);
 static err_t connection_callback(void *arg, struct tcp_pcb *newpcb, err_t err);
@@ -69,6 +70,7 @@ void button_callback(uint gpio, uint32_t events);
 ssd1306_t ssd; // Declaração do display OLED
 volatile static int min_water_level_limit = 10; // Limite mínimo do nível de água (em porcentagem)
 volatile static int max_water_level_limit = 90; // Limite máximo do nível de água (em porcentagem)
+volatile static bool reset_limits=false;
 float ultrasonic_distance = 0.0f; // Variável para armazenar a distância medida pelo sensor ultrassônico
 
 int main()
@@ -76,7 +78,7 @@ int main()
     stdio_init_all();
     sleep_ms(2000); // Aguarda a serial se conectar
 
-    button_init_predefined(true,true,true);
+    button_init_predefined(true, true, true);
 
     button_setup_irq(true,true,true,button_callback);
 
@@ -87,8 +89,10 @@ int main()
 
     ssd1306_fill(&ssd, false); // Limpa a tela
     ssd1306_send_data(&ssd);   // Envia os dados para o display
+
     xQueueWaterLevelReadings = xQueueCreate(5, sizeof(int));
     xMutexDisplay = xSemaphoreCreateMutex();
+
     xTaskCreate(vWebServerTask, "WebServerTask", configMINIMAL_STACK_SIZE,
                 NULL, tskIDLE_PRIORITY + 2, NULL);
     xTaskCreate(vControlWaterPumpTask, "AcionaBombaComBaseNoNivelTask", configMINIMAL_STACK_SIZE,
@@ -154,7 +158,7 @@ void vReadPotentiometerTask(void *pvParameters){
     (void)pvParameters; // Evita aviso de parâmetro não utilizado
 
     // Inicializa o adc e os pinos responsáveis pelo eixo x e y do joystick
-    adc_gpio_init(PIN_ADC_LEITURA_POTENCIOMETRO);
+    adc_gpio_init(ADC_PIN_POTENTIOMETER_READ);
     adc_init();
     int water_level_percentage = 0;
     while (true){
@@ -162,7 +166,7 @@ void vReadPotentiometerTask(void *pvParameters){
         // 0% == 22 lido pelo adc
         // 100% == 4077
         adc_select_input(2); // GPIO 26 = ADC0
-        water_level_percentage = (int)(((float)(adc_read() - ADC_MIN_LEITURA_POTENCIOMETRO) / (ADC_MAX_LEITURA_POTENCIOMETRO - ADC_MIN_LEITURA_POTENCIOMETRO)) * 100.0f);
+        water_level_percentage = (int)(((float)(adc_read() - ADC_MIN_POTENTIOMETER_READING) / (ADC_MAX_POTENTIOMETER_READING - ADC_MIN_POTENTIOMETER_READING)) * 100.0f);
         xQueueSend(xQueueWaterLevelReadings, &water_level_percentage, 0); // Envia o valor da leitura do potenciometro em porcentagem para fila
         vTaskDelay(pdMS_TO_TICKS(100));              // 10 Hz de leitura
     }
@@ -228,7 +232,7 @@ void vDisplayTask(void *pvParameters){
                 ssd1306_draw_string(&ssd, "MEDIDOR NIVEL", 8, 6); // Desenha uma string
                 ssd1306_draw_string(&ssd, " DE AGUA", 20, 16);  // Desenha uma string
                 ssd1306_draw_string(&ssd, "Nivel: ", 10, 31);           // Desenha uma string
-                ssd1306_draw_string(&ssd, str_nivel, 58, 31);         // Desenha uma string
+                ssd1306_draw_string(&ssd, water_level_str, 58, 31);         // Desenha uma string
                 ssd1306_draw_string(&ssd, gpio_get(RELE_PIN) ? "Bomba: OFF" : "Bomba: ON", 10,41);
                 /* ssd1306_draw_string(&ssd, "Nivel", 20, 31);           // Desenha uma string
                 ssd1306_draw_string(&ssd, water_level_str, 20, 42);         // Desenha uma string
@@ -242,22 +246,23 @@ void vDisplayTask(void *pvParameters){
     }
 }
 
+// Task que controla a matriz de LEDs
 void vMatrixLedsTask(void *pvParameters){
     (void)pvParameters; // Evita aviso de parâmetro não utilizado
     init_led_matrix();
     apaga_matriz();
-    uint8_t nivelEmPorcentagem = 0;
+    uint8_t water_level_percentage = 0;
 
     while (true)
     {
-        if(xQueueReceive(xQueueLeiturasDoPotenciometroConvertidoEmNivelDeAgua, &nivelEmPorcentagem, portMAX_DELAY) == pdTRUE){
-            if (nivelEmPorcentagem >= 80){
+        if(xQueueReceive(xQueueWaterLevelReadings, &water_level_percentage, portMAX_DELAY) == pdTRUE){
+            if (water_level_percentage >= 80){
                 desenha_frame(levels,4);
-            }else if(nivelEmPorcentagem >= 60){
+            }else if(water_level_percentage >= 60){
                 desenha_frame(levels,3);
-            }else if(nivelEmPorcentagem >= 40){
+            }else if(water_level_percentage >= 40){
                 desenha_frame(levels,2);
-            }else if(nivelEmPorcentagem >= 20){
+            }else if(water_level_percentage >= 20){
                 desenha_frame(levels,1);
             }else{
                 desenha_frame(levels,0);
@@ -376,7 +381,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
     else if (strstr(req, "GET /estado")){  // Se a requisição for para obter o estado dos sensores(potenciometro com boia)
         adc_select_input(2); // Seleciona o canal ADC 2 para o potenciômetro da boia
         // Converte para porcentagem
-        int nivel_porcentagem = (int)(((float)(adc_read() - ADC_MIN_LEITURA_POTENCIOMETRO) / (ADC_MAX_LEITURA_POTENCIOMETRO - ADC_MIN_LEITURA_POTENCIOMETRO)) * 100.0f);
+        int nivel_porcentagem = (int)(((float)(adc_read() - ADC_MIN_POTENTIOMETER_READING) / (ADC_MAX_POTENTIOMETER_READING - ADC_MIN_POTENTIOMETER_READING)) * 100.0f);
         int estado_bomba_para_json = !gpio_get(RELE_PIN);
         char json_payload[96]; // Buffer para a string JSON
         int json_len = snprintf(json_payload, sizeof(json_payload),
