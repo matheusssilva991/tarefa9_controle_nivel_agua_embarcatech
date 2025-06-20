@@ -27,11 +27,11 @@ set(PICO_BOARD pico_w CACHE STRING "Board type")
 
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
-set(FREERTOS_KERNEL_PATH "C:/FreeRTOS-Kernel")
+set(FREERTOS_KERNEL_PATH "/home/matheus/FreeRTOS-Kernel")
 include(${FREERTOS_KERNEL_PATH}/portable/ThirdParty/GCC/RP2040/FreeRTOS_Kernel_import.cmake)
 
 
-project(tarefa9_controle_nivel_agua_embarcatech C CXX ASM)
+project(main C CXX ASM)
 
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
@@ -44,6 +44,7 @@ add_executable(${PROJECT_NAME} main.c
         lib/ssd1306/display.c # Display library
         lib/buzzer/buzzer.c # Buzzer library)
         lib/matrix_leds/matrix_leds.c # Matrix LEDs library
+        lib/ultrasonic/ultrasonic.c # Ultrasonic library
 )
 
 pico_set_program_name(${PROJECT_NAME} "${PROJECT_NAME}")
@@ -88,5 +89,5 @@ target_link_libraries(${PROJECT_NAME}
         FreeRTOS-Kernel-Heap4
 )
 
-pico_add_extra_outputs(tarefa9_controle_nivel_agua_embarcatech)
+pico_add_extra_outputs(${PROJECT_NAME})
 
