@@ -2,10 +2,6 @@
 
 #include "pico/stdlib.h"
 #include "pico/cyw43_arch.h" // Biblioteca para arquitetura Wi-Fi da Pico com CYW43
-#include "hardware/i2c.h"
-#include "hardware/pio.h"
-#include "hardware/timer.h"
-#include "hardware/clocks.h"
 #include "hardware/adc.h"
 #include "lwip/tcp.h"
 // #include "pico/bootrom.h" // Biblioteca para inicialização do bootrom
@@ -237,8 +233,8 @@ void vDisplayTask(void *pvParameters){
                 /* ssd1306_draw_string(&ssd, "Nivel", 20, 31);           // Desenha uma string
                 ssd1306_draw_string(&ssd, water_level_str, 20, 42);         // Desenha uma string
                 sprintf(distance_str, "%.2f cm", ultrasonic_distance); // Formata a distância medida
-                ssd1306_draw_string(&ssd, distance_str, 20, 53); // Desenha a distância medida
-                ssd1306_send_data(&ssd);                             // Atualiza o display */
+                ssd1306_draw_string(&ssd, distance_str, 20, 53); // Desenha a distância medida*/
+                ssd1306_send_data(&ssd);                             // Atualiza o display
                 xSemaphoreGive(xMutexDisplay);
             }
 
