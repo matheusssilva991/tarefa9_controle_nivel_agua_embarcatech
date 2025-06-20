@@ -4,7 +4,6 @@
 #include "pico/cyw43_arch.h" // Biblioteca para arquitetura Wi-Fi da Pico com CYW43
 #include "hardware/adc.h"
 #include "lwip/tcp.h"
-// #include "pico/bootrom.h" // Biblioteca para inicialização do bootrom
 
 #include "lib/ssd1306/ssd1306.h"
 #include "lib/ssd1306/display.h"
@@ -22,16 +21,16 @@
 #include "queue.h"
 #include "semphr.h"
 
-#define CYW43_LED_PIN CYW43_WL_GPIO_LED_PIN // GPIO do CI CYW43
 
-#define ADC_PIN_POTENTIOMETER_READ 28 // Pino do ADC para ler os valores alterados no potencimetro pela boia
 #define RELE_PIN 16 // Gpio que ativará(low) e desativará(high) o relé para acionar a bomba
-
-#define ANALOG_PIN_X 27 // Pino do ADC para o eixo X do joystick
-#define ANALOG_PIN_Y 26 // Pino do ADC para o eixo Y do joystick
-
+#define ADC_PIN_POTENTIOMETER_READ 28 // Pino do ADC para ler os valores alterados no potencimetro pela boia
 #define ULTRASONIC_TRIG_PIN 18 // Pino do Trig do sensor ultrassônico
 #define ULTRASONIC_ECHO_PIN 19 // Pino do Echo do sensor ultrassônico
+
+// Definições para o sensor ultrassônico
+#define ULTRASONIC_DIST_MAX_VAZIO 28.0f // Distância máxima lida (reservatório vazio)
+#define ULTRASONIC_DIST_MIN_CHEIO 15.0f // Distância mínima lida (reservatório cheio)
+
 
 // OBS: Na hora da montagem do reservatório precisamos ver até onde o potênciometro irá girar no nível mínimo  e máximo para ajustar os valores abaixo
 // Definições para o potenciômetro de boia
@@ -52,8 +51,8 @@ struct http_state
 // Prototipos das funções
 void vWebServerTask(void *pvParameters);
 void vDisplayTask(void *pvParameters);
-void vReadPotentiometerTask(void *pvParameters);
 void vControlWaterPumpTask(void * pvParameters);
+void vReadPotentiometerTask(void *pvParameters);
 void vUltrasonicSensorTask(void *pvParameters);
 void vMatrixLedsTask(void *pvParameters);
 static err_t http_sent(void *arg, struct tcp_pcb *tpcb, u16_t len);
@@ -65,10 +64,9 @@ void button_callback(uint gpio, uint32_t events);
 // Variáveis globais
 ssd1306_t ssd; // Declaração do display OLED
 volatile static int min_water_level_limit = 10; // Limite mínimo do nível de água (em porcentagem)
-volatile static int max_water_level_limit = 90; // Limite máximo do nível de água (em porcentagem)
+volatile static int max_water_level_limit = 50; // Limite máximo do nível de água (em porcentagem)
 volatile static bool reset_limits=false;
 float ultrasonic_distance = 0.0f; // Variável para armazenar a distância medida pelo sensor ultrassônico
-
 int main()
 {
     stdio_init_all();
@@ -93,10 +91,10 @@ int main()
                 NULL, tskIDLE_PRIORITY + 2, NULL);
     xTaskCreate(vControlWaterPumpTask, "AcionaBombaComBaseNoNivelTask", configMINIMAL_STACK_SIZE,
                 NULL, tskIDLE_PRIORITY, NULL);
-    xTaskCreate(vReadPotentiometerTask, "LeituraPotenciometroTask", configMINIMAL_STACK_SIZE,
-                NULL, tskIDLE_PRIORITY, NULL);
     xTaskCreate(vDisplayTask, "vMostraDadosNoDisplayTask", configMINIMAL_STACK_SIZE,
                 NULL, tskIDLE_PRIORITY, NULL);
+    //xTaskCreate(vReadPotentiometerTask, "LeituraPotenciometroTask", configMINIMAL_STACK_SIZE,
+    //            NULL, tskIDLE_PRIORITY, NULL);
     xTaskCreate(vUltrasonicSensorTask, "vUltrasonicSensorTask", configMINIMAL_STACK_SIZE,
                 NULL, tskIDLE_PRIORITY, NULL);
     xTaskCreate(vMatrixLedsTask, "vMatrixLedsTask", configMINIMAL_STACK_SIZE,
@@ -131,7 +129,6 @@ void vUltrasonicSensorTask(void *pvParameters){
 
     // Inicializa os pinos do sensor ultrassônico
     setup_ultrasonic_pins(ULTRASONIC_TRIG_PIN, ULTRASONIC_ECHO_PIN);
-
     while (true){
         uint64_t pulse_duration = get_pulse_duration_us(ULTRASONIC_TRIG_PIN, ULTRASONIC_ECHO_PIN);
 
@@ -145,14 +142,33 @@ void vUltrasonicSensorTask(void *pvParameters){
             printf("Erro: Timeout. Nenhum objeto detectado no alcance.\n");
         }
 
-        sleep_ms(500);
+         // Converte a distância para porcentagem do nível de água
+        // A lógica é inversa: quanto MAIOR a distância, mais VAZIO o tanque (0%).
+        // Quanto MENOR a distância, mais CHEIO o tanque (100%).
+        float float_ultrassonic_distance = (float) ultrasonic_distance;
+        float range = ULTRASONIC_DIST_MAX_VAZIO - ULTRASONIC_DIST_MIN_CHEIO;
+        float adjusted_distance = ultrasonic_distance - ULTRASONIC_DIST_MIN_CHEIO; // Ajusta a distância para o novo zero (tanque cheio)
+
+        // Calcula a porcentagem.
+        // Se a distância for ULTRASONIC_DIST_MIN_CHEIO (cheio), adjusted_distance será 0, e a porcentagem será 100.
+        // Se a distância for ULTRASONIC_DIST_MAX_VAZIO (vazio), adjusted_distance será 'range', e a porcentagem será 0.
+        int water_level_percentage = (int)(((range - adjusted_distance) / range) * 100.0f);
+
+        // Garante que a porcentagem esteja entre 0 e 100
+        if (water_level_percentage < 0.) {
+            water_level_percentage = 0;
+        } else if (water_level_percentage > 100) {
+            water_level_percentage = 100;
+        }
+
+        xQueueSend(xQueueWaterLevelReadings, &water_level_percentage, 0); // Envia o valor da porcentagem para a fila
+        vTaskDelay(pdMS_TO_TICKS(250)); // Aguarda 500ms para a próxima leitura (ajustável)
     }
 }
 
 // Task que controla a leitura do joystick
 void vReadPotentiometerTask(void *pvParameters){
     (void)pvParameters; // Evita aviso de parâmetro não utilizado
-
     // Inicializa o adc e os pinos responsáveis pelo eixo x e y do joystick
     adc_gpio_init(ADC_PIN_POTENTIOMETER_READ);
     adc_init();
@@ -162,16 +178,16 @@ void vReadPotentiometerTask(void *pvParameters){
         // 0% == 22 lido pelo adc
         // 100% == 4077
         adc_select_input(2); // GPIO 26 = ADC0
-        water_level_percentage = (int)(((float)(adc_read() - ADC_MIN_POTENTIOMETER_READING) / (ADC_MAX_POTENTIOMETER_READING - ADC_MIN_POTENTIOMETER_READING)) * 100.0f);
+        water_level_percentage = (((adc_read() - ADC_MIN_POTENTIOMETER_READING) / (ADC_MAX_POTENTIOMETER_READING - ADC_MIN_POTENTIOMETER_READING)) * 100);
         xQueueSend(xQueueWaterLevelReadings, &water_level_percentage, 0); // Envia o valor da leitura do potenciometro em porcentagem para fila
         vTaskDelay(pdMS_TO_TICKS(100));              // 10 Hz de leitura
     }
 }
 
+
 // Task que controla o relé da bomba de água
 void vControlWaterPumpTask(void * pvParameters){
     (void)pvParameters; // Evita aviso de parâmetro não utilizado
-
     gpio_init(RELE_PIN);
     gpio_set_dir(RELE_PIN,GPIO_OUT);
     gpio_put(RELE_PIN,1);// Começa com o Relé desligado, pois ele no nivel alto da gpio é desligado ja que é um rele com optoacoplador
@@ -213,7 +229,6 @@ void vControlWaterPumpTask(void * pvParameters){
 // Task que exibe os dados no display OLED
 void vDisplayTask(void *pvParameters){
     (void)pvParameters; // Evita aviso de parâmetro não utilizado
-
     int water_level_percentage = 0;
     char water_level_str[5]; // Buffer para armazenar a string
     char distance_str[10]; // Buffer para armazenar a string da distância
@@ -230,8 +245,6 @@ void vDisplayTask(void *pvParameters){
                 ssd1306_draw_string(&ssd, "Nivel: ", 10, 31);           // Desenha uma string
                 ssd1306_draw_string(&ssd, water_level_str, 58, 31);         // Desenha uma string
                 ssd1306_draw_string(&ssd, gpio_get(RELE_PIN) ? "Bomba: OFF" : "Bomba: ON", 10,41);
-                /* ssd1306_draw_string(&ssd, "Nivel", 20, 31);           // Desenha uma string
-                ssd1306_draw_string(&ssd, water_level_str, 20, 42);         // Desenha uma string
                 sprintf(distance_str, "%.2f cm", ultrasonic_distance); // Formata a distância medida
                 ssd1306_draw_string(&ssd, distance_str, 20, 53); // Desenha a distância medida*/
                 ssd1306_send_data(&ssd);                             // Atualiza o display
@@ -247,8 +260,7 @@ void vMatrixLedsTask(void *pvParameters){
     (void)pvParameters; // Evita aviso de parâmetro não utilizado
     init_led_matrix();
     apaga_matriz();
-    uint8_t water_level_percentage = 0;
-
+    int water_level_percentage = 0;
     while (true)
     {
         if(xQueueReceive(xQueueWaterLevelReadings, &water_level_percentage, portMAX_DELAY) == pdTRUE){
@@ -375,9 +387,25 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
                         (int)strlen(txt), txt);
     }
     else if (strstr(req, "GET /estado")){  // Se a requisição for para obter o estado dos sensores(potenciometro com boia)
-        adc_select_input(2); // Seleciona o canal ADC 2 para o potenciômetro da boia
-        // Converte para porcentagem
-        int nivel_porcentagem = (int)(((float)(adc_read() - ADC_MIN_POTENTIOMETER_READING) / (ADC_MAX_POTENTIOMETER_READING - ADC_MIN_POTENTIOMETER_READING)) * 100.0f);
+
+        // ULTRASSONICO
+        // Converte a distância ultrassônica para porcentagem
+        float range = ULTRASONIC_DIST_MAX_VAZIO - ULTRASONIC_DIST_MIN_CHEIO;
+        float adjusted_distance = ultrasonic_distance - ULTRASONIC_DIST_MIN_CHEIO;
+        float nivel_porcentagem = (((range - adjusted_distance) / range) * 100.0f);
+
+        // Garante que a porcentagem esteja entre 0 e 100 para o HTTP
+        if (nivel_porcentagem < 0.0f) {
+            nivel_porcentagem = 0.0f;
+        } else if (nivel_porcentagem > 100.0f) {
+            nivel_porcentagem = 100.0f;
+        }
+        //
+
+        // //POTENCIOMETRO
+        // float nivel_porcentagem = (((float)(adc_read() - ADC_MIN_POTENTIOMETER_READING) / (ADC_MAX_POTENTIOMETER_READING - ADC_MIN_POTENTIOMETER_READING)) * 100.0f);
+        // //
+
         int estado_bomba_para_json = !gpio_get(RELE_PIN);
         char json_payload[96]; // Buffer para a string JSON
         int json_len = snprintf(json_payload, sizeof(json_payload),
