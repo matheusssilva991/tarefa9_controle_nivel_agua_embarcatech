@@ -1,14 +1,22 @@
 # Sistema de Controle de Nível de Água
 
+<span id="topo"></span>
+
 ## **Descrição**
 
-Descrição Aqui
+Sistema embarcado para monitoramento e controle automático do nível de água em reservatórios, utilizando o Raspberry Pi Pico W. O projeto integra sensores, display OLED, matriz de LEDs, botões e conectividade Wi-Fi para visualização local e remota do status do reservatório, além de acionar uma bomba d’água automaticamente conforme o nível.
 
 ---
 
 ## **Funcionalidades**
 
-Funcionalidades Aqui
+- Monitoramento do nível de água via potenciômetro de boia ou sensor ultrassônico.
+- Exibição do nível de água em display OLED e matriz de LEDs.
+- Controle automático da bomba d’água com base em limites configuráveis.
+- Alarme sonoro (buzzer) para situações críticas.
+- Interface web para visualização remota do status e configuração dos limites.
+- Indicação visual do status da bomba e do sistema por LEDs.
+- Botões físicos para redefinir limites e controle manual.
 
 ---
 
@@ -16,22 +24,28 @@ Funcionalidades Aqui
 
 ### **Hardware**
 
-- Microcontrolador Raspberry Pi Pico W.
-- Display OLED SSD1306 (128x64 pixels).
-- Matriz de LEDs WS2812B.
-- Botões para controle manual.
-- Fonte de alimentação compatível.
+- Raspberry Pi Pico W
+- Display OLED SSD1306 (128x64)
+- Matriz de LEDs WS2812B (5x5)
+- Sensor de nível (potenciômetro de boia ou sensor ultrassônico)
+- Relé para acionamento da bomba
+- Buzzer
+- Botões (mínimo 3)
+- Fonte de alimentação compatível
 
 ### **Software**
 
 - **SDK do Raspberry Pi Pico.**
 
-- **FreeRTOS** para gerenciamento de tarefas.
-- **lwIP** para comunicação TCP/IP.
-- **Bibliotecas adicionais:**
-  - `ssd1306` para controle do display OLED.
-  - `ws2812b` para controle da matriz de LEDs.
-  - `button` para leitura de botões.
+- SDK do Raspberry Pi Pico
+- FreeRTOS
+- lwIP (TCP/IP)
+- Bibliotecas:
+  - ssd1306 (display OLED)
+  - ws2812b (matriz de LEDs)
+  - button (botões)
+  - buzzer (alarme sonoro)
+  - ultrasonic (opcional, para sensor ultrassônico)
 
 ---
 
@@ -75,10 +89,48 @@ Funcionalidades Aqui
    ninja
    ```
 
+---
+
 ## **Demonstração**
 
 Confira o vídeo de demonstração do projeto no YouTube/Drive:
 [![Demonstração]](link)
+
+---
+
+## 🤝 Equipe
+
+Membros da equipe de desenvolvimento do projeto:
+
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://github.com/matheusssilva991">
+        <img src="https://github.com/matheusssilva991.png" width="100px;" alt="Foto do Matheus S.Silva no GitHub"/><br>
+        <b>Matheus S.Silva</b>
+        <p>Embedded Systems Developer</p>
+      </a>
+    </td>
+     <td align="center">
+      <a href="https://github.com/LeonardoBonifacio">
+        <img src="https://github.com/LeonardoBonifacio.png" width="100px;" alt="Foto do Leonardo Bonifárcio no GitHub"/><br>
+        <b>Leonardo Bonifácio</b>
+        <p>Embedded Systems Developer</p>
+      </a>
+    </td>
+
+   <td align="center">
+      <a href="https://github.com/yuriccosta">
+        <img src="https://github.com/yuriccosta.png" width="100px;" alt="Foto do Yuri Costa no GitHub"/><br>
+        <b>Yuri Costa</b>
+        <p>Embedded Systems Developer</p>
+      </a>
+    </td>
+
+  </tr>
+</table>
+
+---
 
 ## **Contribuindo**
 
@@ -93,3 +145,5 @@ Confira o vídeo de demonstração do projeto no YouTube/Drive:
 ## **Licença**
 
 Este projeto está licenciado sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para mais detalhes.
+
+[⬆ Voltar ao topo](#topo)
