@@ -40,6 +40,7 @@
 // Fila para armazenar os valores de nivel de agua lidos
 QueueHandle_t xQueueWaterLevelReadings;
 SemaphoreHandle_t xMutexDisplay;
+SemaphoreHandle_t xWifiReadySemaphore; // Novo semáforo para sinalizar que o Wi-Fi está pronto
 // Estrutura de dados
 struct http_state
 {
@@ -63,7 +64,7 @@ void button_callback(uint gpio, uint32_t events);
 
 // Variáveis globais
 ssd1306_t ssd; // Declaração do display OLED
-volatile static int min_water_level_limit = 10; // Limite mínimo do nível de água (em porcentagem)
+volatile static int min_water_level_limit = 20; // Limite mínimo do nível de água (em porcentagem)
 volatile static int max_water_level_limit = 50; // Limite máximo do nível de água (em porcentagem)
 volatile static bool reset_limits=false;
 float ultrasonic_distance = 0.0f; // Variável para armazenar a distância medida pelo sensor ultrassônico
@@ -73,6 +74,8 @@ int main()
     sleep_ms(2000); // Aguarda a serial se conectar
 
     button_init_predefined(true, true, true);
+
+    init_buzzer(BUZZER_A_PIN,125.0f);
 
     button_setup_irq(true,true,true,button_callback);
 
@@ -86,6 +89,8 @@ int main()
 
     xQueueWaterLevelReadings = xQueueCreate(5, sizeof(int));
     xMutexDisplay = xSemaphoreCreateMutex();
+    
+    xWifiReadySemaphore = xSemaphoreCreateBinary(); // Cria um semáforo binário, inicialmente "não tomado"
 
     xTaskCreate(vWebServerTask, "WebServerTask", configMINIMAL_STACK_SIZE,
                 NULL, tskIDLE_PRIORITY + 2, NULL);
@@ -129,6 +134,8 @@ void vUltrasonicSensorTask(void *pvParameters){
 
     // Inicializa os pinos do sensor ultrassônico
     setup_ultrasonic_pins(ULTRASONIC_TRIG_PIN, ULTRASONIC_ECHO_PIN);
+    xSemaphoreTake(xWifiReadySemaphore, portMAX_DELAY);
+    xSemaphoreGive(xWifiReadySemaphore); // Dá o semáforo de volta para que outras tasks também possam usá-lo
     while (true){
         uint64_t pulse_duration = get_pulse_duration_us(ULTRASONIC_TRIG_PIN, ULTRASONIC_ECHO_PIN);
 
@@ -173,6 +180,8 @@ void vReadPotentiometerTask(void *pvParameters){
     adc_gpio_init(ADC_PIN_POTENTIOMETER_READ);
     adc_init();
     int water_level_percentage = 0;
+    xSemaphoreTake(xWifiReadySemaphore, portMAX_DELAY);
+    xSemaphoreGive(xWifiReadySemaphore); // Dá o semáforo de volta para que outras tasks também possam usá-lo
     while (true){
         // ja estou armazenando na fila a porcentagem em relação ao valor lido
         // 0% == 22 lido pelo adc
@@ -192,6 +201,8 @@ void vControlWaterPumpTask(void * pvParameters){
     gpio_set_dir(RELE_PIN,GPIO_OUT);
     gpio_put(RELE_PIN,1);// Começa com o Relé desligado, pois ele no nivel alto da gpio é desligado ja que é um rele com optoacoplador
     int water_level_percentage = 0;
+    xSemaphoreTake(xWifiReadySemaphore, portMAX_DELAY);
+    xSemaphoreGive(xWifiReadySemaphore); // Dá o semáforo de volta para que outras tasks também possam usá-lo
     while (true){
         if (xQueueReceive(xQueueWaterLevelReadings, &water_level_percentage, portMAX_DELAY) == pdTRUE){
             if (water_level_percentage <= min_water_level_limit){
@@ -261,6 +272,8 @@ void vMatrixLedsTask(void *pvParameters){
     init_led_matrix();
     apaga_matriz();
     int water_level_percentage = 0;
+    xSemaphoreTake(xWifiReadySemaphore, portMAX_DELAY);
+    xSemaphoreGive(xWifiReadySemaphore); // Dá o semáforo de volta para que outras tasks também possam usá-lo
     while (true)
     {
         if(xQueueReceive(xQueueWaterLevelReadings, &water_level_percentage, portMAX_DELAY) == pdTRUE){
@@ -319,6 +332,7 @@ void vWebServerTask(void *pvParameters){
         start_http_server();
         vTaskDelay(pdMS_TO_TICKS(2000)); // pra dar tempo de ver o ip
         xSemaphoreGive(xMutexDisplay);
+        xSemaphoreGive(xWifiReadySemaphore); // Sinaliza que o Wi-Fi está pronto!
     }
 
 
