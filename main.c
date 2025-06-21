@@ -43,7 +43,7 @@ SemaphoreHandle_t xMutexDisplay;
 // Estrutura de dados
 struct http_state
 {
-    char response[4096];
+    char response[10000];
     size_t len;
     size_t sent;
 };
@@ -93,10 +93,10 @@ int main()
                 NULL, tskIDLE_PRIORITY, NULL);
     xTaskCreate(vDisplayTask, "vMostraDadosNoDisplayTask", configMINIMAL_STACK_SIZE,
                 NULL, tskIDLE_PRIORITY, NULL);
-    //xTaskCreate(vReadPotentiometerTask, "LeituraPotenciometroTask", configMINIMAL_STACK_SIZE,
-    //            NULL, tskIDLE_PRIORITY, NULL);
-    xTaskCreate(vUltrasonicSensorTask, "vUltrasonicSensorTask", configMINIMAL_STACK_SIZE,
+    xTaskCreate(vReadPotentiometerTask, "LeituraPotenciometroTask", configMINIMAL_STACK_SIZE,
                 NULL, tskIDLE_PRIORITY, NULL);
+    //xTaskCreate(vUltrasonicSensorTask, "vUltrasonicSensorTask", configMINIMAL_STACK_SIZE,
+    //            NULL, tskIDLE_PRIORITY, NULL);
     xTaskCreate(vMatrixLedsTask, "vMatrixLedsTask", configMINIMAL_STACK_SIZE,
                 NULL, tskIDLE_PRIORITY, NULL);
 
@@ -178,7 +178,7 @@ void vReadPotentiometerTask(void *pvParameters){
         // 0% == 22 lido pelo adc
         // 100% == 4077
         adc_select_input(2); // GPIO 26 = ADC0
-        water_level_percentage = (((adc_read() - ADC_MIN_POTENTIOMETER_READING) / (ADC_MAX_POTENTIOMETER_READING - ADC_MIN_POTENTIOMETER_READING)) * 100);
+        water_level_percentage = (((float)(adc_read() - ADC_MIN_POTENTIOMETER_READING) / (ADC_MAX_POTENTIOMETER_READING - ADC_MIN_POTENTIOMETER_READING)) * 100.0f);
         xQueueSend(xQueueWaterLevelReadings, &water_level_percentage, 0); // Envia o valor da leitura do potenciometro em porcentagem para fila
         vTaskDelay(pdMS_TO_TICKS(100));              // 10 Hz de leitura
     }
@@ -345,7 +345,8 @@ static err_t http_sent(void *arg, struct tcp_pcb *tpcb, u16_t len)
 
 // Função de recebimento HTTP
 static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err)
-{
+{   
+
     if (!p)
     {
         tcp_close(tpcb);
@@ -390,6 +391,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
 
         // ULTRASSONICO
         // Converte a distância ultrassônica para porcentagem
+        /*
         float range = ULTRASONIC_DIST_MAX_VAZIO - ULTRASONIC_DIST_MIN_CHEIO;
         float adjusted_distance = ultrasonic_distance - ULTRASONIC_DIST_MIN_CHEIO;
         float nivel_porcentagem = (((range - adjusted_distance) / range) * 100.0f);
@@ -400,17 +402,18 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
         } else if (nivel_porcentagem > 100.0f) {
             nivel_porcentagem = 100.0f;
         }
-        //
+        */
 
         // //POTENCIOMETRO
-        // float nivel_porcentagem = (((float)(adc_read() - ADC_MIN_POTENTIOMETER_READING) / (ADC_MAX_POTENTIOMETER_READING - ADC_MIN_POTENTIOMETER_READING)) * 100.0f);
+        float nivel_porcentagem = (((float)(adc_read() - ADC_MIN_POTENTIOMETER_READING) / (ADC_MAX_POTENTIOMETER_READING - ADC_MIN_POTENTIOMETER_READING)) * 100.0f);
         // //
 
         int estado_bomba_para_json = !gpio_get(RELE_PIN);
         char json_payload[96]; // Buffer para a string JSON
         int json_len = snprintf(json_payload, sizeof(json_payload),
-                                 "{\"bomba_agua\":%d,\"nivel_agua\":%d}\r\n",
-                                 estado_bomba_para_json, nivel_porcentagem); // Enviando como 'nivel_agua' e 'bomba_agua'
+                                 "{\"bomba_agua\":%d,\"nivel_agua\":%d, \"limite_maximo\":%d,\"limite_minimo\":%d}\r\n",
+                                 estado_bomba_para_json, (int)nivel_porcentagem, 
+                                 max_water_level_limit, min_water_level_limit); // Enviando como 'nivel_agua', estado'bomba_agua', limite 'max' e 'min'
          hs->len = snprintf(hs->response, sizeof(hs->response),
                            "HTTP/1.1 200 OK\r\n"
                            "Content-Type: application/json\r\n"
@@ -420,6 +423,36 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
                            "%s",
                            json_len, json_payload);
 
+    }
+    else if (strstr(req, "POST /limites")) {
+        char *body = strstr(req, "\r\n\r\n");
+        if(body) {
+            body += 4;
+            
+            // Extrai os valores diretamente usando sscanf
+            int max_val, min_val;
+            if(sscanf(body, "{\"max\":%d,\"min\":%d", &max_val, &min_val) == 2) {
+                // Valida os valores recebidos
+                if(max_val >= 0 && max_val <= 100 && min_val >= 0 && min_val <= 100) {
+                    max_water_level_limit = max_val;
+                    min_water_level_limit = min_val;
+                }
+            }
+        }
+        
+        printf("Novos limites: Max=%d, Min=%d\n", 
+            max_water_level_limit, 
+            min_water_level_limit); 
+        
+        // Confirma atualização
+        const char *txt = "Limites atualizados";
+        hs->len = snprintf(hs->response, sizeof(hs->response),
+                        "HTTP/1.1 200 OK\r\n"
+                        "Content-Type: text/plain\r\n"
+                        "Content-Length: %d\r\n"
+                        "\r\n"
+                        "%s",
+                        (int)strlen(txt), txt);
     }
     else{
         hs->len = snprintf(hs->response, sizeof(hs->response),
